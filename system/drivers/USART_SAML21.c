@@ -1,6 +1,6 @@
-#include "USART_SAML21.h"
 #include "RTE_Device.h"
 #include "SERCOM_SAML21.h"
+#include "USART_SAML21.h"
 
 #define ARM_USART_DRV_VERSION    ARM_DRIVER_VERSION_MAJOR_MINOR(2, 0)  /* driver version */
 
@@ -18,7 +18,6 @@ static const ARM_DRIVER_VERSION DriverVersion = {
 
 static ARM_DRIVER_VERSION USART_GetVersion(void)
 {
-
     return DriverVersion;
 }
 
@@ -78,7 +77,6 @@ static int32_t USARTx_Initialize(const USART_RESOURCE *res, ARM_USART_SignalEven
     res->info->cb_event = cb_event;
     //TO DO: reset status
 
-
     //Enable pins
     PinEnable(res->sercom_res->pad[res->RXPO]);
     switch (res->TXPO)
@@ -133,10 +131,7 @@ static int32_t USARTx_PowerControl(const USART_RESOURCE *res, ARM_POWER_STATE st
         //Disable peripheral clock
         Sercom_PeriphalClockDisable(res->sercom_res);
 
-        //TO DO:
-        //Reset status
-        //res->info->status.rx_busy = 0;
-        //res->info->status.tx_busy = 0;
+        //TO DO: Reset status
 
         //Clear powered flag
         res->info->flags &= ~USART_FLAG_POWERED;
@@ -147,9 +142,11 @@ static int32_t USARTx_PowerControl(const USART_RESOURCE *res, ARM_POWER_STATE st
 //        break;
 
     case ARM_POWER_FULL:
+        //Check if USART has been initialized
         if ((res->info->flags & USART_FLAG_INITIALIZED )== 0)
             return ARM_DRIVER_ERROR;
-
+        
+        //No action required if USART already powered
         if (res->info->flags & USART_FLAG_POWERED)
             return ARM_DRIVER_OK;
 
@@ -200,6 +197,7 @@ static int32_t USARTx_Control(const USART_RESOURCE *res, uint32_t control, uint3
         break;
 
     case ARM_USART_MODE_SYNCHRONOUS_MASTER:
+        //Check if TXPO setting allows synchronous operation
         if (res->TXPO > 1)
             return ARM_DRIVER_ERROR_UNSUPPORTED;
 
@@ -210,12 +208,13 @@ static int32_t USARTx_Control(const USART_RESOURCE *res, uint32_t control, uint3
         if (res->TXPO > 1)
             return ARM_DRIVER_ERROR_UNSUPPORTED;
 
-        ctrla = SERCOM_USART_CTRLA_CMODE;
+        ctrla = SERCOM_USART_CTRLA_CMODE | SERCOM_USART_CTRLA_MODE(0);
         break;
     }
 
     if (ctrla)
     {
+        //Check if USART is powered
         if (res->info->flags & ~USART_FLAG_POWERED)
             return ARM_DRIVER_ERROR;
 
@@ -285,10 +284,11 @@ static int32_t USARTx_Control(const USART_RESOURCE *res, uint32_t control, uint3
         //if ((control & ARM_USART_CPHA_Msk) == ARM_USART_CPHA1)
         //    ctrla |= SERCOM_USART_CTRLB_CPHA;
 
-        //Reset SERCOM
+        //Reset USART
         usart->CTRLA.bit.SWRST = 1;
         while (usart->SYNCBUSY.bit.SWRST);
-
+        
+        //Set control registers
         usart->CTRLA.reg = ctrla;
         usart->CTRLB.reg = ctrlb;
 
