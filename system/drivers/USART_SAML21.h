@@ -1,7 +1,6 @@
 #ifndef USART_SAML21_H_INCLUDED
 #define USART_SAML21_H_INCLUDED
 
-//#include "sam.h"
 #include "DriverCommon.h"
 #include "Driver_USART.h"
 #include "SERCOM_SAML21.h"
@@ -15,7 +14,7 @@ typedef struct
 {
     ARM_USART_SignalEvent_t cb_event;
     ARM_USART_STATUS status;
-    uint32_t bytesToTransfer;
+    //uint32_t bytesToTransfer;
     uint32_t rxCount, txCount;
     const uint8_t *dataOut;
     uint8_t *dataIn;
