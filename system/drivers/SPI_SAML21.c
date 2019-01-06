@@ -125,6 +125,10 @@ static int32_t SPIx_PowerControl(const SPI_RESOURCE *res, ARM_POWER_STATE state)
         //Disable interrupt
         NVIC_DisableIRQ(res->sercom_res->irq);
 
+        //Reset registers
+        res->sercom_res->sercom->SPI.CTRLA.bit.SWRST = 1;
+        while (res->sercom_res->sercom->SPI.SYNCBUSY.bit.SWRST);
+
         //Disable peripheral clock
         Sercom_PeriphalClockDisable(res->sercom_res);
 
@@ -343,8 +347,7 @@ static uint32_t SPIx_TransferData(const SPI_RESOURCE *res, const void *dataOut, 
     res->info->bytesRecieved = 0;
     res->info->bytesSent = 0;
 
-    spi->INTENSET.reg = SERCOM_SPI_INTENSET_DRE;
-    spi->INTENSET.reg = SERCOM_SPI_INTENSET_RXC;
+    spi->INTENSET.reg = SERCOM_SPI_INTENSET_DRE | SERCOM_SPI_INTENSET_RXC;
 
     return ARM_DRIVER_OK;
 }
@@ -361,7 +364,7 @@ void SPIx_Handler(const SPI_RESOURCE *res)
         if (ti->dataOut)
             spi->DATA.reg = *ti->dataOut++;
         else
-            spi->DATA.reg = 0xFF;
+            spi->DATA.reg = ti->defaultTX;
 
         ti->bytesSent++;
         if (ti->bytesSent == ti->bytesToTransfer)
@@ -372,10 +375,9 @@ void SPIx_Handler(const SPI_RESOURCE *res)
     //Receive complete interrupt
     if (spi->INTFLAG.bit.RXC)
     {
+        uint8_t data = spi->DATA.reg;
         if (ti->dataIn)
-            *ti->dataIn++ = spi->DATA.reg;
-        else
-            (uint8_t) spi->DATA.reg;
+            *ti->dataIn++ = data;
 
         ti->bytesRecieved++;
         if (ti->bytesRecieved == ti->bytesToTransfer)
@@ -386,7 +388,8 @@ void SPIx_Handler(const SPI_RESOURCE *res)
             ti->status.busy = 0;
 
             //Call callback event
-            ti->cb_event(ARM_SPI_EVENT_TRANSFER_COMPLETE);
+            if (ti->cb_event)
+                ti->cb_event(ARM_SPI_EVENT_TRANSFER_COMPLETE);
         }
     }
 }

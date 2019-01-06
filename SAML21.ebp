@@ -94,6 +94,7 @@
 		<Unit filename="packs\FreeRTOS\timers.c">
 			<Option compilerVar="CC" />
 		</Unit>
+		<Unit filename="README.md" />
 		<Unit filename="src\main.c">
 			<Option compilerVar="CC" />
 		</Unit>

@@ -16,10 +16,14 @@ typedef struct
 {
     ARM_USART_SignalEvent_t cb_event;
     ARM_USART_STATUS status;
-    uint32_t rxCount, txCount;
     const uint8_t *dataOut;
     uint8_t *dataIn;
+    uint32_t bytesToReceive;
+    uint32_t bytesToSend;
+    uint32_t bytesReceived;
+    uint32_t bytesSent;
     uint32_t flags;
+    uint8_t defaultTX;
 } USART_INFO;
 
 typedef struct
