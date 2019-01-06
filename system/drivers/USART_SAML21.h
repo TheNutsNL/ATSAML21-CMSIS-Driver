@@ -6,15 +6,16 @@
 #include "SERCOM_SAML21.h"
 
 //USART flags
-#define USART_FLAG_INITIALIZED        0x01
-#define USART_FLAG_POWERED            0x02
-#define USART_FLAG_ENABLED            0x04
+#define USART_FLAG_INITIALIZED          0x01
+#define USART_FLAG_POWERED              0x02
+#define USART_FLAG_ENABLED              0x04
+#define USART_FLAG_MODE_ASYNCHRONOUS    0x08
+#define USART_FLAG_MODE_SYNCHRONOUS     0x10
 
 typedef struct
 {
     ARM_USART_SignalEvent_t cb_event;
     ARM_USART_STATUS status;
-    //uint32_t bytesToTransfer;
     uint32_t rxCount, txCount;
     const uint8_t *dataOut;
     uint8_t *dataIn;

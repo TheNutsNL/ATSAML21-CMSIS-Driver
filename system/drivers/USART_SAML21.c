@@ -75,7 +75,8 @@ static int32_t USARTx_Initialize(const USART_RESOURCE *res, ARM_USART_SignalEven
 
     //Resister call back event
     res->info->cb_event = cb_event;
-    //TO DO: reset status
+    res->info->rxCount = 0;
+    res->info->txCount = 0;
 
     //Enable pins
     PinEnable(res->sercom_res->pad[res->RXPO]);
@@ -131,7 +132,8 @@ static int32_t USARTx_PowerControl(const USART_RESOURCE *res, ARM_POWER_STATE st
         //Disable peripheral clock
         Sercom_PeriphalClockDisable(res->sercom_res);
 
-        //TO DO: Reset status
+        res->info->rxCount = 0;
+        res->info->txCount = 0;
 
         //Clear powered flag
         res->info->flags &= ~USART_FLAG_POWERED;
@@ -145,7 +147,7 @@ static int32_t USARTx_PowerControl(const USART_RESOURCE *res, ARM_POWER_STATE st
         //Check if USART has been initialized
         if ((res->info->flags & USART_FLAG_INITIALIZED )== 0)
             return ARM_DRIVER_ERROR;
-        
+
         //No action required if USART already powered
         if (res->info->flags & USART_FLAG_POWERED)
             return ARM_DRIVER_OK;
@@ -178,6 +180,10 @@ static int32_t USARTx_Receive(const USART_RESOURCE *res, void *data, uint32_t nu
 
 static int32_t USARTx_Transfer(const USART_RESOURCE *res, const void *data_out, void *data_in, uint32_t num)
 {
+    //Transfer mode is only available in synchronous mode
+    if ((res->info->flags & USART_FLAG_MODE_SYNCHRONOUS) == 0)
+        return ARM_DRIVER_ERROR;
+
     return ARM_DRIVER_OK;
 }
 
@@ -186,6 +192,7 @@ static int32_t USARTx_Control(const USART_RESOURCE *res, uint32_t control, uint3
     SercomUsart *const usart = &res->sercom_res->sercom->USART;
     uint32_t ctrla = 0;
     uint32_t ctrlb;
+    uint32_t temp;
 
     switch (control & ARM_USART_CONTROL_Msk)
     {
@@ -194,6 +201,15 @@ static int32_t USARTx_Control(const USART_RESOURCE *res, uint32_t control, uint3
 
     case ARM_USART_MODE_ASYNCHRONOUS:
         ctrla = SERCOM_USART_CTRLA_MODE(1);
+
+        //Calculate baud setting (16x oversampling with fractional baud rate)
+        temp = SystemCoreClock * 8 / (16 * arg);
+
+        if ((temp == 0) || (temp > 0xFFFF))
+            return ARM_USART_ERROR_BAUDRATE;
+
+        usart->BAUD.reg = (temp & 0xE0000) | ((temp >> 3) & 0x1FFF);
+
         break;
 
     case ARM_USART_MODE_SYNCHRONOUS_MASTER:
@@ -202,6 +218,15 @@ static int32_t USARTx_Control(const USART_RESOURCE *res, uint32_t control, uint3
             return ARM_DRIVER_ERROR_UNSUPPORTED;
 
         ctrla = SERCOM_USART_CTRLA_CMODE | SERCOM_USART_CTRLA_MODE(1);
+
+        //Calculate baud setting
+        temp = SystemCoreClock / (2 * arg);
+
+        if (temp > 0xFF)
+            return ARM_USART_ERROR_BAUDRATE;
+
+        usart->BAUD.reg = temp & 0xFF;
+
         break;
 
     case ARM_USART_MODE_SYNCHRONOUS_SLAVE:
@@ -218,8 +243,8 @@ static int32_t USARTx_Control(const USART_RESOURCE *res, uint32_t control, uint3
         if (res->info->flags & ~USART_FLAG_POWERED)
             return ARM_DRIVER_ERROR;
 
-        //Setup pads
-        ctrla |= SERCOM_USART_CTRLA_RXPO(res->RXPO) | SERCOM_USART_CTRLA_TXPO(res->TXPO);
+        //Setup pads and set 16x over-sampling using fraction baud generation
+        ctrla |= SERCOM_USART_CTRLA_RXPO(res->RXPO) | SERCOM_USART_CTRLA_TXPO(res->TXPO) | SERCOM_USART_CTRLA_SAMPR(1);
 
         //Set data bits
         switch (control & ARM_USART_DATA_BITS_Msk)
@@ -287,11 +312,19 @@ static int32_t USARTx_Control(const USART_RESOURCE *res, uint32_t control, uint3
         //Reset USART
         usart->CTRLA.bit.SWRST = 1;
         while (usart->SYNCBUSY.bit.SWRST);
-        
+
         //Set control registers
         usart->CTRLA.reg = ctrla;
         usart->CTRLB.reg = ctrlb;
 
+        //Enable USART
+        usart->CTRLA.bit.ENABLE = 1;
+        while (usart->SYNCBUSY.bit.ENABLE);
+
+        if ((control & ARM_USART_CONTROL_Msk) == ARM_USART_MODE_ASYNCHRONOUS)
+            res->info->flags |= USART_FLAG_MODE_ASYNCHRONOUS;
+        else
+            res->info->flags |= USART_FLAG_MODE_SYNCHRONOUS;
     }
 
     return ARM_DRIVER_OK;
@@ -313,7 +346,7 @@ void USARTx_Handler(const USART_RESOURCE *res)
 
 //Configure USART1
 #if (RTE_SERCOM1_MODE == RTE_SERCOM_MODE_USART)
-static USART_INFO USART1_info = {0, {0}, 0, 0, 0, 0, 0, 0};
+static USART_INFO USART1_info = {0, {0}, 0, 0, 0, 0};
 static const USART_RESOURCE USART1_res =
 {
     &sercom1_res,

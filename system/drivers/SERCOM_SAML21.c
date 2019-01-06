@@ -18,7 +18,6 @@ void Sercom_PeriphalClockEnable(const SERCOM_Resource* res)
     GCLK->PCHCTRL[res->coreId].bit.CHEN = 1;
 }
 
-
 #ifndef RTE_SERCOM0_MODE
     #define RTE_SERCOM0_MODE RTE_SERCOM_MODE_NONE
 #endif
