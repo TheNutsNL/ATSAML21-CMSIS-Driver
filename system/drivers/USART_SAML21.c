@@ -398,11 +398,39 @@ static int32_t USARTx_Control(const USART_RESOURCE *res, uint32_t control, uint3
             //    ctrla |= SERCOM_USART_CTRLB_CPHA;
         }
 
-        //Set flag for asynchronous or synchronous operation
-        if ((control & ARM_USART_CONTROL_Msk) == ARM_USART_MODE_ASYNCHRONOUS)
-            res->info->flags |= USART_FLAG_MODE_ASYNCHRONOUS;
-        else
-            res->info->flags |= USART_FLAG_MODE_SYNCHRONOUS;
+        if (((control & ARM_USART_CONTROL_Msk) != ARM_USART_FLOW_CONTROL_NONE) && (res->TXPO != 2))
+            return ARM_DRIVER_ERROR_UNSUPPORTED;
+
+        switch (control & ARM_USART_CONTROL_Msk)
+        {
+        case ARM_USART_FLOW_CONTROL_NONE:
+            //Disable RTS pin (pad 2) and CTS pin (pad 3)
+            PinDisable(res->sercom_res->pad[2]);
+            PinDisable(res->sercom_res->pad[3]);
+            usart->INTENCLR.bit.CTSIC = 1;
+            break;
+
+        case ARM_USART_FLOW_CONTROL_RTS:
+            //Enable RTS pin (pad 2) and disable CTS pin (pad 3)
+            PinEnable(res->sercom_res->pad[2]);
+            PinDisable(res->sercom_res->pad[3]);
+            usart->INTENCLR.bit.CTSIC = 1;
+            break;
+
+        case ARM_USART_FLOW_CONTROL_CTS:
+            //Disable RTS pin (pad 2) and enable CTS pin (pad 3)
+            PinDisable(res->sercom_res->pad[2]);
+            PinEnable(res->sercom_res->pad[3]);
+            usart->INTENSET.bit.CTSIC = 1;
+            break;
+
+        case ARM_USART_FLOW_CONTROL_RTS_CTS:
+            //Enable RTS pin (pad 2) and CTS pin (pad 3)
+            PinEnable(res->sercom_res->pad[2]);
+            PinEnable(res->sercom_res->pad[3]);
+            usart->INTENSET.bit.CTSIC = 1;
+            break;
+        }
 
         //Disable USART
         if (usart->CTRLA.bit.ENABLE)
@@ -534,20 +562,26 @@ int32_t USARTx_Transfer_Synchronous(const USART_RESOURCE *res, const void *dataO
     return ARM_DRIVER_OK;
 }
 
+
 static int32_t USARTx_SetModemControl(const USART_RESOURCE *res, ARM_USART_MODEM_CONTROL control)
 {
-    return ARM_DRIVER_OK;
+    //Direct control of control lines is not available
+    return ARM_DRIVER_ERROR_UNSUPPORTED;
 }
+
 
 static ARM_USART_MODEM_STATUS USARTx_GetModemStatus(const USART_RESOURCE *res)
 {
-    SercomUsart *usart = &res->sercom_res->sercom->USART;
     ARM_USART_MODEM_STATUS retVal;
 
-    retVal.cts = usart->STATUS.bit.CTS;
+    retVal.cts = res->sercom_res->sercom->USART.STATUS.bit.CTS;
+    retVal.dsr = 0;
+    retVal.dcd = 0;
+    retVal.ri = 0;
 
     return retVal;
 }
+
 
 void USARTx_Handler(const USART_RESOURCE *res)
 {
@@ -621,6 +655,15 @@ void USARTx_Handler(const USART_RESOURCE *res)
             if (res->info->cb_event)
                 res->info->cb_event(ARM_USART_EVENT_RX_OVERFLOW);
         }
+    }
+    else if (usart->INTFLAG.bit.CTSIC)
+    {
+        //Signal event
+        if (res->info->cb_event)
+            res->info->cb_event(ARM_USART_EVENT_CTS);
+
+        //Clear interrupt flag
+        usart->INTFLAG.reg = SERCOM_USART_INTFLAG_CTSIC;
     }
     else if (usart->INTFLAG.bit.RXBRK)
     {

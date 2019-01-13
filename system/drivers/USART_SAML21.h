@@ -9,9 +9,7 @@
 #define USART_FLAG_INITIALIZED          0x01
 #define USART_FLAG_POWERED              0x02
 #define USART_FLAG_ENABLED              0x04
-#define USART_FLAG_MODE_ASYNCHRONOUS    0x08
-#define USART_FLAG_MODE_SYNCHRONOUS     0x10
-#define USART_FLAG_TRANSFER             0x20
+#define USART_FLAG_TRANSFER             0x10
 
 typedef struct
 {
