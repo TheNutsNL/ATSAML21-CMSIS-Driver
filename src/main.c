@@ -125,6 +125,9 @@ void TestUSART()
     usart->PowerControl(ARM_POWER_FULL);
 
     usart->Control(ARM_USART_MODE_ASYNCHRONOUS, 9600);
+    usart->Control(ARM_USART_CONTROL_RX, 1);
+    usart->Control(ARM_USART_CONTROL_TX, 1);
+
     isUsartBusy = false;
     usart->Send(dataOut, sizeof(dataOut));
     while (isUsartBusy);

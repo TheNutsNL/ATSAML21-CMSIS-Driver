@@ -6,6 +6,7 @@
 
 static int32_t USARTx_PowerControl(const USART_RESOURCE *res, ARM_POWER_STATE state);
 static void USART_ResetStatus(USART_INFO *info);
+static int32_t USARTx_Transfer_Synchronous(const USART_RESOURCE *res, const void *dataOut, void *dataIn, uint32_t num);
 
 /* Driver Version */
 static const ARM_DRIVER_VERSION DriverVersion = {
@@ -27,10 +28,12 @@ void USART_ResetStatus(USART_INFO *info)
     *((uint32_t*) &info->status) = 0;
 }
 
+
 static ARM_DRIVER_VERSION USART_GetVersion(void)
 {
     return DriverVersion;
 }
+
 
 static ARM_USART_CAPABILITIES USARTx_GetCapabilities(const USART_RESOURCE *res)
 {
@@ -79,6 +82,7 @@ static ARM_USART_CAPABILITIES USARTx_GetCapabilities(const USART_RESOURCE *res)
     return driverCapabilities;
 }
 
+
 static int32_t USARTx_Initialize(const USART_RESOURCE *res, ARM_USART_SignalEvent_t cb_event)
 {
     if (res->info->flags & USART_FLAG_INITIALIZED)
@@ -88,7 +92,7 @@ static int32_t USARTx_Initialize(const USART_RESOURCE *res, ARM_USART_SignalEven
     res->info->cb_event = cb_event;
     USART_ResetStatus(res->info);
 
-    //Enable pins
+    //Enable RxD and TxD pins
     PinEnable(res->sercom_res->pad[res->RXPO]);
     switch (res->TXPO)
     {
@@ -112,7 +116,7 @@ static int32_t USARTx_Uninitialize(const USART_RESOURCE *res)
     if (res->info->flags & USART_FLAG_POWERED)
         USARTx_PowerControl(res, ARM_POWER_OFF);
 
-    //Disable pins
+    //Disable RxD and TxD pins
     PinDisable(res->sercom_res->pad[res->RXPO]);
     switch (res->TXPO)
     {
@@ -131,12 +135,16 @@ static int32_t USARTx_Uninitialize(const USART_RESOURCE *res)
     return ARM_DRIVER_OK;
 }
 
+
 static int32_t USARTx_PowerControl(const USART_RESOURCE *res, ARM_POWER_STATE state)
 {
     switch (state)
     {
     case ARM_POWER_OFF:
-        //Disable interrupt
+        //Disable erro interrupt
+        res->sercom_res->sercom->USART.INTENCLR.bit.ERROR = 1;
+
+        //Disable interrupts
         NVIC_DisableIRQ(res->sercom_res->irq);
 
         //Disable peripheral clock
@@ -184,91 +192,10 @@ static int32_t USARTx_PowerControl(const USART_RESOURCE *res, ARM_POWER_STATE st
     return ARM_DRIVER_OK;
 }
 
-static int32_t USARTx_Send(const USART_RESOURCE *res, const void *data, uint32_t num)
-{
-    SercomUsart *const usart = &res->sercom_res->sercom->USART;
-
-    //Check if USART and transmitter are enabled
-    if ((usart->CTRLA.bit.ENABLE == 0)  || (usart->CTRLB.bit.TXEN == 0) || (num == 0))
-        return ARM_DRIVER_ERROR;
-
-    //Check if transmitter is not busy sending
-    if (res->info->status.tx_busy == 1)
-        return ARM_DRIVER_ERROR_BUSY;
-
-    res->info->status.tx_busy = 1;
-    res->info->dataOut = (uint8_t*) data;
-    res->info->bytesToSend = num;
-    res->info->bytesSent = 0;
-
-    usart->INTENSET.reg = SERCOM_USART_INTENSET_DRE;
-
-    return ARM_DRIVER_OK;
-}
-
-static int32_t USARTx_Receive(const USART_RESOURCE *res, void *data, uint32_t num)
-{
-    SercomUsart *const usart = &res->sercom_res->sercom->USART;
-
-    //Check is USART and receiver are enabled
-    if ((usart->CTRLA.bit.ENABLE == 0) || (usart->CTRLB.bit.RXEN == 0) || (num == 0))
-        return ARM_DRIVER_ERROR;
-
-    //Check if receiver is not busy
-    if (res->info->status.rx_busy == 1)
-        return ARM_DRIVER_ERROR_BUSY;
-
-    res->info->status.rx_busy = 1;
-    res->info->status.rx_framing_error = 0;
-
-    res->info->dataIn = (uint8_t*) data;
-    res->info->bytesToReceive = num;
-    res->info->bytesReceived = 0;
-
-    if (usart->CTRLA.bit.CMODE)
-    {
-        //res->info
-        usart->INTENSET.reg = SERCOM_USART_INTENSET_DRE | SERCOM_USART_INTENSET_RXC;
-    }
-    else
-        usart->INTENSET.bit.RXC;
-
-    return ARM_DRIVER_OK;
-}
-
-static int32_t USARTx_Transfer(const USART_RESOURCE *res, const void *dataOut, void *dataIn, uint32_t num)
-{
-    SercomUsart *const usart = &res->sercom_res->sercom->USART;
-
-    //Transfer mode is only available in synchronous mode
-    if ((usart->CTRLA.bit.CMODE != 1) || (num == 0))
-        return ARM_DRIVER_ERROR;
-
-    //Check if USART, receiver and transmitter are enabled
-    if ((usart->CTRLA.bit.ENABLE == 0) || (usart->CTRLB.bit.RXEN == 0) || (usart->CTRLB.bit.TXEN == 0))
-        return ARM_DRIVER_ERROR;
-
-    //Check if USART is not busy sending or receiving
-    if ((res->info->status.tx_busy == 1) || (res->info->status.rx_busy == 1))
-        return ARM_DRIVER_ERROR_BUSY;
-
-    res->info->status.tx_busy = 1;
-    res->info->status.rx_busy = 1;
-    res->info->dataOut = (uint8_t*) dataOut;
-    res->info->dataIn = (uint8_t*) dataIn;
-    res->info->bytesToReceive = num;
-    res->info->bytesToSend = num;
-    res->info->bytesReceived = 0;
-    res->info->bytesSent = 0;
-
-    usart->INTENSET.reg = SERCOM_USART_INTENSET_DRE | SERCOM_USART_INTENSET_RXC;
-
-    return ARM_DRIVER_OK;
-}
 
 static int32_t USARTx_Control(const USART_RESOURCE *res, uint32_t control, uint32_t arg)
 {
-    SercomUsart *const usart = &res->sercom_res->sercom->USART;
+    SercomUsart *usart = &res->sercom_res->sercom->USART;
     uint32_t ctrla = 0;
     uint32_t ctrlb;
     uint16_t baud;
@@ -276,9 +203,16 @@ static int32_t USARTx_Control(const USART_RESOURCE *res, uint32_t control, uint3
 
     switch (control & ARM_USART_CONTROL_Msk)
     {
+    case ARM_USART_MODE_IRDA:
     case ARM_USART_MODE_ASYNCHRONOUS:
         //Asynchronous mode using internal clock
         ctrla = SERCOM_USART_CTRLA_MODE(1);
+
+        if ((control & ARM_USART_CONTROL_Msk) == ARM_USART_MODE_IRDA)
+            //Enable IrDA encoding
+            ctrlb = SERCOM_USART_CTRLB_ENC;
+        else
+            ctrlb = 0;
 
         //Calculate baud setting (16x oversampling with fractional baud rate)
         temp = SystemCoreClock * 8 / (16 * arg);
@@ -297,6 +231,7 @@ static int32_t USARTx_Control(const USART_RESOURCE *res, uint32_t control, uint3
 
         //Synchronous mode using internal clock
         ctrla = SERCOM_USART_CTRLA_CMODE | SERCOM_USART_CTRLA_MODE(1);
+        ctrlb = 0;
 
         //Calculate baud setting
         temp = SystemCoreClock / (2 * arg);
@@ -314,12 +249,20 @@ static int32_t USARTx_Control(const USART_RESOURCE *res, uint32_t control, uint3
 
         //Synchronous mode using external clock
         ctrla = SERCOM_USART_CTRLA_CMODE | SERCOM_USART_CTRLA_MODE(0);
+        ctrlb = 0;
         break;
+
     case ARM_USART_CONTROL_RX:
         if (arg == 0)
-            usart->CTRLB.bit.RXEN = 1;
-        else if (arg == 1)
+        {
             usart->CTRLB.bit.RXEN = 0;
+            usart->INTENSET.bit.RXC = 0;
+        }
+        else if (arg == 1)
+        {
+            usart->CTRLB.bit.RXEN = 1;
+            usart->INTENCLR.bit.RXC = 1;
+        }
         else
             return ARM_DRIVER_ERROR_PARAMETER;
 
@@ -330,9 +273,9 @@ static int32_t USARTx_Control(const USART_RESOURCE *res, uint32_t control, uint3
 
     case ARM_USART_CONTROL_TX:
         if (arg == 0)
-            usart->CTRLB.bit.TXEN = 1;
-        else if (arg == 1)
             usart->CTRLB.bit.TXEN = 0;
+        else if (arg == 1)
+            usart->CTRLB.bit.TXEN = 1;
         else
             return ARM_DRIVER_ERROR_PARAMETER;
 
@@ -341,10 +284,41 @@ static int32_t USARTx_Control(const USART_RESOURCE *res, uint32_t control, uint3
 
         break;
 
+    case ARM_USART_ABORT_RECEIVE:
+            if ((res->info->flags & USART_FLAG_TRANSFER) == 0)
+            {
+                res->info->status.rx_busy = 0;
+            }
+
+            break;
+
+    case ARM_USART_ABORT_SEND:
+            if ((res->info->flags & USART_FLAG_TRANSFER) == 0)
+            {
+                usart->INTENCLR.bit.DRE;
+                res->info->status.tx_busy = 0;
+            }
+
+            break;
+
+    case ARM_USART_ABORT_TRANSFER:
+            if (res->info->flags & USART_FLAG_TRANSFER)
+            {
+                usart->INTENCLR.bit.DRE = 0;
+
+                res->info->status.rx_busy = 0;
+                res->info->status.tx_busy = 0;
+
+                res->info->flags &= ~USART_FLAG_TRANSFER;
+            }
+            break;
+
     case ARM_USART_SET_DEFAULT_TX_VALUE:
         res->info->defaultTX = (uint8_t) arg;
         break;
-
+// TODO (Ashley Nuttall#1#): Calculate correct RXPL value
+//    case ARM_USART_SET_IRDA_PULSE:
+//        break;
     default:
         return ARM_DRIVER_ERROR_UNSUPPORTED;
 
@@ -363,23 +337,23 @@ static int32_t USARTx_Control(const USART_RESOURCE *res, uint32_t control, uint3
         switch (control & ARM_USART_DATA_BITS_Msk)
         {
         case ARM_USART_DATA_BITS_5:
-            ctrlb = SERCOM_USART_CTRLB_CHSIZE(5);
+            ctrlb |= SERCOM_USART_CTRLB_CHSIZE(5);
             break;
 
         case ARM_USART_DATA_BITS_6:
-            ctrlb = SERCOM_USART_CTRLB_CHSIZE(6);
+            ctrlb |= SERCOM_USART_CTRLB_CHSIZE(6);
             break;
 
         case ARM_USART_DATA_BITS_7:
-            ctrlb = SERCOM_USART_CTRLB_CHSIZE(7);
+            ctrlb |= SERCOM_USART_CTRLB_CHSIZE(7);
             break;
 
         case ARM_USART_DATA_BITS_8:
-            ctrlb = SERCOM_USART_CTRLB_CHSIZE(0);
+            ctrlb |= SERCOM_USART_CTRLB_CHSIZE(0);
             break;
 
         case ARM_USART_DATA_BITS_9:
-            ctrlb = SERCOM_USART_CTRLB_CHSIZE(1);
+            ctrlb |= SERCOM_USART_CTRLB_CHSIZE(1);
             break;
 
         default:
@@ -456,6 +430,110 @@ static int32_t USARTx_Control(const USART_RESOURCE *res, uint32_t control, uint3
     return ARM_DRIVER_OK;
 }
 
+
+static int32_t USARTx_Send(const USART_RESOURCE *res, const void *data, uint32_t num)
+{
+    SercomUsart *usart = &res->sercom_res->sercom->USART;
+
+    //Check if USART and transmitter are enabled
+    if ((usart->CTRLA.bit.ENABLE == 0)  || (usart->CTRLB.bit.TXEN == 0) || (num == 0))
+        return ARM_DRIVER_ERROR;
+
+    if (usart->CTRLA.bit.CMODE)
+    {
+        //Send using synchronous mode
+        return USARTx_Transfer_Synchronous(res, data, 0, num);
+    }
+    else
+    {
+        //Check if transmitter is not busy sending
+        if (res->info->status.tx_busy == 1)
+            return ARM_DRIVER_ERROR_BUSY;
+
+        res->info->status.tx_busy = 1;
+        res->info->status.tx_underflow = 0;
+
+        res->info->dataOut = (uint8_t*) data;
+        res->info->bytesToSend = num;
+        res->info->bytesSent = 0;
+
+        usart->INTENSET.reg = SERCOM_USART_INTENSET_DRE;
+    }
+    return ARM_DRIVER_OK;
+}
+
+static int32_t USARTx_Receive(const USART_RESOURCE *res, void *data, uint32_t num)
+{
+    SercomUsart *const usart = &res->sercom_res->sercom->USART;
+
+    //Check if USART and receiver is enabled
+    if ((usart->CTRLA.bit.ENABLE == 0) || (usart->CTRLB.bit.RXEN == 0) || (num == 0))
+        return ARM_DRIVER_ERROR;
+
+    if (usart->CTRLA.bit.CMODE)
+    {
+        //Receive using synchronous mode
+        return USARTx_Transfer_Synchronous(res, 0, data, num);
+    }
+    else
+    {
+        //Check if receiver is not busy
+        if (res->info->status.rx_busy == 1)
+            return ARM_DRIVER_ERROR_BUSY;
+
+        res->info->status.rx_busy = 1;
+        res->info->status.rx_break = 0;
+        res->info->status.rx_overflow = 0;
+        res->info->status.rx_framing_error = 0;
+        res->info->status.rx_parity_error = 0;
+
+        res->info->dataIn = (uint8_t*) data;
+        res->info->bytesToReceive = num;
+        res->info->bytesReceived = 0;
+    }
+
+    return ARM_DRIVER_OK;
+}
+
+static int32_t USARTx_Transfer(const USART_RESOURCE *res, const void *dataOut, void *dataIn, uint32_t num)
+{
+    SercomUsart *const usart = &res->sercom_res->sercom->USART;
+
+    //Check if USART, receiver and transmitter is enabled
+    if ((usart->CTRLA.bit.ENABLE == 0) || (usart->CTRLB.bit.RXEN == 0) || (usart->CTRLB.bit.TXEN == 0)  || (num == 0))
+        return ARM_DRIVER_ERROR;
+
+    return USARTx_Transfer_Synchronous(res, dataOut, dataIn, num);
+}
+
+
+int32_t USARTx_Transfer_Synchronous(const USART_RESOURCE *res, const void *dataOut, void *dataIn, uint32_t num)
+{
+    SercomUsart *const usart = &res->sercom_res->sercom->USART;
+
+    //Transfer mode is only available in synchronous mode
+    if (usart->CTRLA.bit.CMODE != 1)
+        return ARM_DRIVER_ERROR;
+
+    //Check if USART is not busy sending or receiving
+    if ((res->info->status.tx_busy == 1) || (res->info->status.rx_busy == 1))
+        return ARM_DRIVER_ERROR_BUSY;
+
+    res->info->flags |= USART_FLAG_TRANSFER;
+    res->info->status.tx_busy = 1;
+    res->info->status.rx_busy = 1;
+    res->info->dataOut = (uint8_t*) dataOut;
+    res->info->dataIn = (uint8_t*) dataIn;
+    res->info->bytesToReceive = num;
+    res->info->bytesToSend = num;
+    res->info->bytesReceived = 0;
+    res->info->bytesSent = 0;
+
+    usart->INTENSET.reg = SERCOM_USART_INTENSET_DRE | SERCOM_USART_INTENSET_RXC;
+
+    return ARM_DRIVER_OK;
+}
+
 static int32_t USARTx_SetModemControl(const USART_RESOURCE *res, ARM_USART_MODEM_CONTROL control)
 {
     return ARM_DRIVER_OK;
@@ -463,7 +541,12 @@ static int32_t USARTx_SetModemControl(const USART_RESOURCE *res, ARM_USART_MODEM
 
 static ARM_USART_MODEM_STATUS USARTx_GetModemStatus(const USART_RESOURCE *res)
 {
-    //return ARM_DRIVER_OK;
+    SercomUsart *usart = &res->sercom_res->sercom->USART;
+    ARM_USART_MODEM_STATUS retVal;
+
+    retVal.cts = usart->STATUS.bit.CTS;
+
+    return retVal;
 }
 
 void USARTx_Handler(const USART_RESOURCE *res)
@@ -472,31 +555,37 @@ void USARTx_Handler(const USART_RESOURCE *res)
 
     if (usart->INTFLAG.bit.DRE)
     {
-        if (res->info->bytesSent == res->info->bytesToSend)
-        {
-            //Disable data register empty interrupt
-            usart->INTENCLR.bit.DRE = 0;
-
-            //Transmit complete
-            res->info->status.tx_busy = 0;
-            if (res->info->cb_event)
-                res->info->cb_event(ARM_USART_EVENT_SEND_COMPLETE);
-        }
-        else
+        if (res->info->status.tx_busy)
         {
             //Send next byte
             if (res->info->dataOut != 0)
                 usart->DATA.reg = *res->info->dataOut++;
             else
-                usart->DATA.reg = 0xFF;
+                usart->DATA.reg = res->info->defaultTX;
 
             res->info->bytesSent++;
 
+            if (res->info->bytesSent == res->info->bytesToSend)
+            {
+                //Disable data register empty interrupt
+                usart->INTENCLR.bit.DRE = 0;
+
+                //Send complete
+                res->info->status.tx_busy = 0;
+
+                //Signal send complete event
+                if ((res->info->cb_event) && ((res->info->flags & USART_FLAG_TRANSFER) == 0))
+                    res->info->cb_event(ARM_USART_EVENT_SEND_COMPLETE);
+            }
+        }
+        else
+        {
+            usart->INTENCLR.bit.DRE = 0;
         }
     }
     else if (usart->INTFLAG.bit.RXC)
     {
-        if (res->info->bytesReceived < res->info->bytesToReceive)
+        if (res->info->status.rx_busy)
         {
             uint8_t data = usart->DATA.reg;
 
@@ -504,17 +593,87 @@ void USARTx_Handler(const USART_RESOURCE *res)
                 *res->info->dataIn++ = data;
 
             res->info->bytesReceived++;
+
             if (res->info->bytesReceived == res->info->bytesToReceive)
             {
+                //Receive complete
                 res->info->status.rx_busy = 0;
+
+                //Signal receive complete event
                 if (res->info->cb_event)
-                    res->info->cb_event(ARM_USART_EVENT_RECEIVE_COMPLETE);
+                {
+                    if (res->info->flags & USART_FLAG_TRANSFER)
+                    {
+                        res->info->flags &= ~USART_FLAG_TRANSFER;
+                        res->info->cb_event(ARM_USART_EVENT_TRANSFER_COMPLETE);
+                    }
+                    else
+                        res->info->cb_event(ARM_USART_EVENT_RECEIVE_COMPLETE);
+                }
             }
         }
+        else
+        {
+            //Receive buffer overflow
+            res->info->status.rx_overflow = 1;
+
+            //Signal buffer overflow event
+            if (res->info->cb_event)
+                res->info->cb_event(ARM_USART_EVENT_RX_OVERFLOW);
+        }
+    }
+    else if (usart->INTFLAG.bit.RXBRK)
+    {
+        //Receive break detected
+        res->info->status.rx_break = 1;
+
+        //Signal event
+        if (res->info->cb_event)
+            res->info->cb_event(ARM_USART_EVENT_RX_BREAK);
+
+        //Clear receive break flag
+        usart->INTFLAG.reg |= SERCOM_USART_INTFLAG_RXBRK;
     }
     else if (usart->INTFLAG.bit.ERROR)
     {
-        //Clear error interrupt flag
+        if (usart->STATUS.bit.FERR)
+        {
+            //Framing error occurred
+            res->info->status.rx_framing_error = 1;
+
+            //Signal event
+            if (res->info->cb_event)
+                res->info->cb_event(ARM_USART_EVENT_RX_FRAMING_ERROR);
+
+            //Clear framing error flag
+            usart->STATUS.reg = SERCOM_USART_STATUS_FERR;
+        }
+        else if (usart->STATUS.bit.PERR)
+        {
+            //Parity error occurred
+            res->info->status.rx_parity_error = 1;
+
+            //Signal event
+            if (res->info->cb_event)
+                res->info->cb_event(ARM_USART_EVENT_RX_PARITY_ERROR);
+
+            //Clear parity error flag
+            usart->STATUS.reg = SERCOM_USART_STATUS_PERR;
+        }
+        else if (usart->STATUS.bit.BUFOVF)
+        {
+            //Receiver overflow occurred
+            res->info->status.rx_overflow = 1;
+
+            //Signal event
+            if (res->info->cb_event)
+                res->info->cb_event(ARM_USART_EVENT_RX_OVERFLOW);
+
+            //Clear overflow flag
+            usart->STATUS.reg = SERCOM_USART_STATUS_BUFOVF;
+        }
+
+        //Reset error flag
         usart->INTFLAG.reg = SERCOM_USART_INTFLAG_ERROR;
     }
 }

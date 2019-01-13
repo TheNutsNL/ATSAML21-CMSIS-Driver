@@ -11,6 +11,7 @@
 #define USART_FLAG_ENABLED              0x04
 #define USART_FLAG_MODE_ASYNCHRONOUS    0x08
 #define USART_FLAG_MODE_SYNCHRONOUS     0x10
+#define USART_FLAG_TRANSFER             0x20
 
 typedef struct
 {
