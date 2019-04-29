@@ -32,15 +32,15 @@ namespace System
       IRQ_TRNG = TRNG_IRQn,
    }
    
-   typedef void (*IRQ_Handler_t) ()
+   typedef void (*IRQ_Handler_t) ();
    
    class Interrupt
    {
    private:
-      IRQ_Handler_t IRQ_handlers[PERIPH_COUNT_IRQn];
+      static IRQ_Handler_t IRQ_handlers[PERIPH_COUNT_IRQn];
       
    public:
-      void Register(IRQ_NUM num, IRQ_Handler_t handler) {IRQ_Handlers[num] = handler;}
+      void RegisterIRQ(IRQ_NUM num, IRQ_Handler_t handler) { IRQ_Handlers[num] = handler; }
       virtual void ISR() = 0;
       
       static void SYSTEM_Handler();
